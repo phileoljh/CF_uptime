@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+vnev/
+.venv/
+env/
+.venv*/
+
+# SQLite Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Output HTML
+index.html
+ai_view.html
+
+# Environment variables
+.env
+!.env.example
