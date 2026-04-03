@@ -1,22 +1,15 @@
-# Python
+# 無需 .wrangler/ 或 node_modules/（不使用本地 CLI）
+
+# Python (若有)
 __pycache__/
 *.py[cod]
-*$py.class
-*.env
-vnev/
+venv/
 .venv/
-env/
-.venv*/
 
 # SQLite Database
 *.db
 *.sqlite
-*.sqlite3
 
-# Output HTML
-index.html
-ai_view.html
-
-# Environment variables
+# 機敏資訊（本地筆記，若有）
 .env
-!.env.example
+secrets.txt
