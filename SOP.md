@@ -328,11 +328,12 @@ async function performHealthCheck(site) {
 }
 
 // ============================================================
-// 防抖邏輯：ADD（故障確認）/ DAA（恢復確認）
+// 防抖邏輯：ADD（故障確認）/ DAA（恢復確認） / DDDDDD（持續故障報警）
 // ============================================================
 //  last_stable_status  上一筆  本次   → 動作
 //  ALIVE               DEAD    DEAD   → ALERT_DOWN  + stable←DEAD
 //  DEAD                ALIVE   ALIVE  → ALERT_RECOVERY + stable←ALIVE
+//  DEAD                DEAD    DEAD   → 檢查是否超過 8 小時未恢復，是則 ALERT_LONG_DOWN
 //  其他任何組合                       → 僅寫入紀錄，靜默
 async function evaluateDebounce(site, result, lastLog, env) {
   const cur = result.status;
@@ -359,6 +360,21 @@ async function evaluateDebounce(site, result, lastLog, env) {
     await env.DB.prepare(
       "UPDATE sites SET last_stable_status='ALIVE', updated_at=CURRENT_TIMESTAMP WHERE id=?"
     ).bind(site.id).run();
+
+  } else if (cur === 'DEAD' && prev === 'DEAD' && stable === 'DEAD') {
+    // DDDDDD 長期故障報警邏輯
+    // 當狀態保持為 DEAD 時，我們會檢查 alert_history
+    // 如果過去 8 小時內（從 timestamp 計算），該站點沒有觸發過任何 ALERT_DOWN 或 ALERT_LONG_DOWN
+    // 代表故障已經持續超過 8 小時且未發送過長效報警，便觸發 ALERT_LONG_DOWN 進行追蹤
+    const recentLongDown = await env.DB.prepare(
+      `SELECT id FROM alert_history
+       WHERE site_id = ? AND alert_type IN ('ALERT_DOWN', 'ALERT_LONG_DOWN')
+       AND timestamp > datetime('now', '-8 hours')`
+    ).bind(site.id).first();
+
+    if (!recentLongDown) {
+      await sendAlert(env, site, 'ALERT_LONG_DOWN', result);
+    }
   }
 }
 
@@ -367,16 +383,25 @@ async function evaluateDebounce(site, result, lastLog, env) {
 // ============================================================
 async function sendAlert(env, site, alertType, result) {
   const isDown = alertType === 'ALERT_DOWN';
+  const isLongDown = alertType === 'ALERT_LONG_DOWN';
   const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 
+  let title = '🟢 *已恢復正常*';
+  if (isDown) title = '🔴 *故障確認*';
+  if (isLongDown) title = '⚠️ *持續故障警告 (已超過8小時)*';
+
+  let logicText = '💡 邏輯：DAA（連續兩次探測恢復）';
+  if (isDown) logicText = '💡 邏輯：ADD（連續兩次探測失敗）';
+  if (isLongDown) logicText = '💡 邏輯：DDDDDD（超過預設8小時未恢復）';
+
   const message = [
-    isDown ? '🔴 *故障確認*' : '🟢 *已恢復正常*',
+    title,
     '',
     `📍 站點：${site.name}`,
     `🔗 網址：${site.url}`,
     `⏱️ 延遲：${result.latencyMs}ms`,
-    isDown ? `❌ 錯誤：${result.errorMsg || 'N/A'}` : null,
-    isDown ? '💡 邏輯：ADD（連續兩次探測失敗）' : '💡 邏輯：DAA（連續兩次探測恢復）',
+    (isDown || isLongDown) ? `❌ 錯誤：${result.errorMsg || 'N/A'}` : null,
+    logicText,
     '',
     `🕐 時間：${timestamp}`,
   ].filter(Boolean).join('\n');
@@ -506,8 +531,15 @@ function buildHTML(sites, alerts) {
   }).join('');
 
   const alertRows = alerts.map(a => {
-    const icon = a.alert_type === 'ALERT_DOWN' ? '🔴' : '🟢';
-    const label = a.alert_type === 'ALERT_DOWN' ? '故障報警' : '恢復通知';
+    let icon = '🟢';
+    let label = '恢復通知';
+    if (a.alert_type === 'ALERT_DOWN') {
+      icon = '🔴';
+      label = '故障報警';
+    } else if (a.alert_type === 'ALERT_LONG_DOWN') {
+      icon = '⚠️';
+      label = '持續故障(>8h)';
+    }
     const ts = new Date(a.timestamp + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
     return `<tr>
       <td>${icon} ${label}</td>
@@ -558,7 +590,7 @@ function buildHTML(sites, alerts) {
 <body>
 <header>
   <h1>📡 HihiMonitor 系統監控</h1>
-  <p>防抖機制 ADD / DAA ｜ 每 5 分鐘探測 ｜ 資料保留 90 天 ｜ Telegram 即時報警</p>
+  <p>防抖機制 ADD / DAA / DDDDDD ｜ 每 5 分鐘探測 ｜ 資料保留 90 天 ｜ Telegram 即時報警</p>
 </header>
 <div class="grid">${cards}</div>
 <h2>📋 近期報警紀錄</h2>

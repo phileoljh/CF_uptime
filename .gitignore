@@ -9,6 +9,7 @@ venv/
 # SQLite Database
 *.db
 *.sqlite
+*.html
 
 # 機敏資訊（本地筆記，若有）
 .env
