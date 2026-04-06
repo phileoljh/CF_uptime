@@ -243,7 +243,23 @@ export default {
       return await handleDeleteSite(url, env);
     }
 
-    return await renderDashboard(env);
+    // ============================================================
+    // 實作 Cache API：快取 60 秒，有效降低高頻存取造成的 D1 讀取消耗
+    // ============================================================
+    const cache = caches.default;
+    // 使用完整 URL 當作快取的鍵值 (Cache Key)
+    const cacheKey = new Request(url.toString(), request);
+    let response = await cache.match(cacheKey);
+
+    if (!response) {
+      // 若無快取或已過期，則向 D1 抓取資料並渲染畫面
+      response = await renderDashboard(env);
+      
+      // 寫入快取，waitUntil 確保非同步寫入不會拖慢使用者的網頁載入
+      ctx.waitUntil(cache.put(cacheKey, response.clone()));
+    }
+
+    return response;
   },
 
   // ── 排程事件處理（健康檢查 + 資料清理）
@@ -531,7 +547,8 @@ async function renderDashboard(env) {
   return new Response(buildHTML(siteData, alerts, env), {
     headers: {
       'Content-Type': 'text/html;charset=UTF-8',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      // 設定 Cache-Control，讓 caches.default.put() 自動擷取此秒數作為快取存活期，也允許瀏覽器做對應秒數的快取
+      'Cache-Control': 'public, s-maxage=60, max-age=60',
     },
   });
 }
