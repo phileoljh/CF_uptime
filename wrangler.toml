@@ -21,6 +21,7 @@ compatibility_date = "2025-01-01"
 # ── 環境變數（Dashboard: Worker → Settings → Environment Variables）
 # ALERT_COOLDOWN_MINUTES = 30
 # DATA_RETENTION_DAYS    = 90
+# LONG_DOWN_HOURS        = 8
 
 # ── 機敏 Secrets（Dashboard: Environment Variables → 勾選 Encrypt）
 # TELEGRAM_BOT_TOKEN  → 加密儲存

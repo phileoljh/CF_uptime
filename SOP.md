@@ -228,6 +228,11 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // 針對 HEAD 探測直接回傳 200，避免觸發儀表板渲染耗費 D1 讀取資源
+    if (request.method === 'HEAD') {
+      return new Response(null, { status: 200 });
+    }
+
     if (url.pathname === '/api/status') {
       return await handleApiStatus(env);
     }
@@ -333,7 +338,7 @@ async function performHealthCheck(site) {
 //  last_stable_status  上一筆  本次   → 動作
 //  ALIVE               DEAD    DEAD   → ALERT_DOWN  + stable←DEAD
 //  DEAD                ALIVE   ALIVE  → ALERT_RECOVERY + stable←ALIVE
-//  DEAD                DEAD    DEAD   → 檢查是否超過 8 小時未恢復，是則 ALERT_LONG_DOWN
+//  DEAD                DEAD    DEAD   → 檢查是否超過預設小時數未恢復，是則 ALERT_LONG_DOWN
 //  其他任何組合                       → 僅寫入紀錄，靜默
 async function evaluateDebounce(site, result, lastLog, env) {
   const cur = result.status;
@@ -364,13 +369,14 @@ async function evaluateDebounce(site, result, lastLog, env) {
   } else if (cur === 'DEAD' && prev === 'DEAD' && stable === 'DEAD') {
     // DDDDDD 長期故障報警邏輯
     // 當狀態保持為 DEAD 時，我們會檢查 alert_history
-    // 如果過去 8 小時內（從 timestamp 計算），該站點沒有觸發過任何 ALERT_DOWN 或 ALERT_LONG_DOWN
-    // 代表故障已經持續超過 8 小時且未發送過長效報警，便觸發 ALERT_LONG_DOWN 進行追蹤
+    // 如果過去 N 小時內（從 timestamp 計算），該站點沒有觸發過任何 ALERT_DOWN 或 ALERT_LONG_DOWN
+    // 代表故障已經持續超過 N 小時且未發送過長效報警，便觸發 ALERT_LONG_DOWN 進行追蹤
+    const longDownHours = env.LONG_DOWN_HOURS || '8';
     const recentLongDown = await env.DB.prepare(
       `SELECT id FROM alert_history
        WHERE site_id = ? AND alert_type IN ('ALERT_DOWN', 'ALERT_LONG_DOWN')
-       AND timestamp > datetime('now', '-8 hours')`
-    ).bind(site.id).first();
+       AND timestamp > datetime('now', '-' || ? || ' hours')`
+    ).bind(site.id, longDownHours).first();
 
     if (!recentLongDown) {
       await sendAlert(env, site, 'ALERT_LONG_DOWN', result);
@@ -391,13 +397,15 @@ async function sendAlert(env, site, alertType, result) {
   const isLongDown = alertType === 'ALERT_LONG_DOWN';
   const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 
+  const longDownHours = env.LONG_DOWN_HOURS || '8';
+
   let title = '🟢 *已恢復正常*';
   if (isDown) title = '🔴 *故障確認*';
-  if (isLongDown) title = '⚠️ *持續故障警告 (已超過8小時)*';
+  if (isLongDown) title = `⚠️ *持續故障警告 (已超過${longDownHours}小時)*`;
 
   let logicText = '💡 邏輯：DAA（連續兩次探測恢復）';
   if (isDown) logicText = '💡 邏輯：ADD（連續兩次探測失敗）';
-  if (isLongDown) logicText = '💡 邏輯：DDDDDD（超過預設8小時未恢復）';
+  if (isLongDown) logicText = `💡 邏輯：DDDDDD（超過預設${longDownHours}小時未恢復）`;
 
   const message = [
     title,
@@ -520,7 +528,7 @@ async function renderDashboard(env) {
      JOIN sites s ON ah.site_id = s.id ORDER BY ah.timestamp DESC LIMIT 10`
   ).all();
 
-  return new Response(buildHTML(siteData, alerts), {
+  return new Response(buildHTML(siteData, alerts, env), {
     headers: {
       'Content-Type': 'text/html;charset=UTF-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -528,7 +536,7 @@ async function renderDashboard(env) {
   });
 }
 
-function buildHTML(sites, alerts) {
+function buildHTML(sites, alerts, env) {
   const cards = sites.map(site => {
     const dots = site.logs.map(log => {
       const c = log.status === 'ALIVE' ? '#10b981' : '#ef4444';
@@ -566,8 +574,9 @@ function buildHTML(sites, alerts) {
       icon = '🔴';
       label = '故障報警';
     } else if (a.alert_type === 'ALERT_LONG_DOWN') {
+      const h = env.LONG_DOWN_HOURS || '8';
       icon = '⚠️';
-      label = '持續故障(>8h)';
+      label = `持續故障(>${h}h)`;
     }
     const ts = new Date(a.timestamp + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
     return `<tr>
@@ -700,13 +709,14 @@ async function handleDeleteSite(url, env) {
 
 1. 進入 Worker (`uptime-monitor`) → 上方 **Settings** 分頁
 2. 左側選擇 **Variables and Secrets** → 點擊右側的 **+ Add (新增)**
-3. 畫面右側滑出設定面板，依序新增以下三筆（皆選擇 `Text` 類型）：
+3. 畫面右側滑出設定面板，依序新增以下四筆（皆選擇 `Text` 類型）：
 
 | Type (類型) | Variable name | Value | 說明 |
 |-------------|---------------|-------|------|
 | `Text` | `ALERT_CHANNELS`           | `telegram` | **報警旗標**！填入 `telegram` 或 `line`，或 `telegram,line` |
 | `Text` | `ALERT_COOLDOWN_MINUTES`   | `30`       | 同一網站報警冷卻時間（分鐘） |
 | `Text` | `DATA_RETENTION_DAYS`      | `90`       | uptime_logs 保留天數 |
+| `Text` | `LONG_DOWN_HOURS`          | `8`        | 長期故障報警間隔時數（預設 8 小時） |
 
 ### 6.2 設定機敏金鑰 (加密儲存)
 
