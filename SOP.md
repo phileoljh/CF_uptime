@@ -619,7 +619,7 @@ function buildHTML(sites, alerts) {
 <body>
 <header>
   <h1>📡 HiHiMonitor 系統監控</h1>
-  <p>防抖機制 ADD / DAA / DDDDDD ｜ 每 5 分鐘探測 ｜ 資料保留 90 天 ｜ Telegram 即時報警</p>
+  <p>防抖機制 ADD / DAA / DDDDDD ｜ 每 5 分鐘探測 ｜ 資料保留 90 天 ｜ Line/Telegram 即時報警</p>
 </header>
 <div class="grid">${cards}</div>
 <h2>📋 近期報警紀錄</h2>
