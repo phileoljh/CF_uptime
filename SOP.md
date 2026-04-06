@@ -617,7 +617,7 @@ function buildHTML(sites, alerts, env) {
   const cards = sites.map(site => {
     const dots = site.logs.map(log => {
       const c = log.status === 'ALIVE' ? '#10b981' : '#ef4444';
-      const twTime = new Date(log.timestamp + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+      const twTime = new Date(log.timestamp.replace(' ', 'T') + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
       return `<span class="dot" style="background:${c}" title="${twTime} ${log.status} ${log.latency_ms}ms"></span>`;
     }).join('');
 
