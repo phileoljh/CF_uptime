@@ -10,23 +10,24 @@
 1. 前往 [LINE Developers Console](https://developers.line.biz/console/)。
 2. 使用您個人的 LINE 帳號完成登入。
 
-### 步驟 2：建立 Provider 與 Channel
-1. 若您尚未擁有任何 Provider，點擊 **Create a new provider** 建立一個（例如可命名為 `UptimeMonitor`）。
-2. 進入該 Provider 頁面後，點擊 **Create a new channel**。
-3. 服務類型請選擇：**Messaging API**。
-4. 依序填寫必填欄位：
-   - Channel name (機器人顯示名稱)
-   - Channel description (描述)
-   - Category (類別，可隨意選)
-   - Email (您的信箱)
-5. 勾選同意服務條款，並點擊 **Create** 確認建立機器人。
+### 步驟 2：從 LINE 官方帳號後台建立機器人 (新版政策)
+根據 LINE 的最新政策，現在無法直接在開發者後台建立頻道，必須透過建立「LINE 官方帳號 (OA)」來開通：
+1. 點擊畫面上的綠色按鈕 **Create a LINE Official Account** (它會將您引導至 LINE Official Account Manager 網頁)。
+2. 填寫新建官方帳號的必填資料（Account name 填寫例如 `HihiMonitor`、輸入信箱並隨意選擇一個業別）後送出建立。
+3. 建立成功後，點擊進入該官方帳號的後台首頁。
+4. 點擊畫面右上角的 **「設定 (Settings / ⚙️齒輪圖示)」**。
+5. 在左側選單中找到 **「Messaging API」** 並點選進入。
+6. 點擊畫面上的 **「啟用 Messaging API」**。
+7. 此時系統會跳出視窗請您選取 Provider，請選擇您剛剛在步驟 1 建立的 `UptimeMonitor` (或是當場輸入名字新建一個)，並點擊同意即可完成開通！
 
 ### 步驟 3：獲取 Channel Access Token (環境變數一)
-1. 建立完成後，點擊進入您剛成立的 Channel。
-2. 切換到 **Messaging API** 分頁。
-3. 頁面往下滑到最底部的 **Channel access token (long-lived)** 區塊。
-4. 點擊 **Issue** 按鈕產生 Token。
-5. 👉 **複製這段超長字串**，這就是您在 Cloudflare 等下要填入的 `LINE_CHANNEL_ACCESS_TOKEN`。
+雖然是在 OA 後台開通的，但我們要拿的金鑰一樣都在開發者後台找：
+1. 回到剛才的 [LINE Developers Console](https://developers.line.biz/console/) 網頁並重新整理。
+2. 點進您的 `UptimeMonitor` Provider，您會發現剛剛綁定的 Channel 終於出現了，點擊進入該 Channel。
+3. 切換到上方的 **Messaging API** 分頁。
+4. 頁面往下滑到最底部的 **Channel access token (long-lived)** 區塊。
+5. 點擊 **Issue** 按鈕產生 Token。
+6. 👉 **複製這段超長字串**，這就是您在 Cloudflare 要填入的 `LINE_CHANNEL_ACCESS_TOKEN`。
 
 ### 步驟 4：獲取 User ID (環境變數二) 與加好友
 1. 切換回第一個 **Basic settings** 分頁。

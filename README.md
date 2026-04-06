@@ -2,6 +2,8 @@
 
 HihiMonitor 是一個基於 Cloudflare 邊緣網路架構所建立的輕量級、高可用性網站監控系統。透過 Cloudflare Workers 執行監控邏輯，D1 作為關聯式資料庫儲存紀錄，並結合 Zero Trust 確保儀表板安全。本專案可達成長期且無需任何伺服器成本的網站可用性監控。
 
+> 🌐 **Live Demo (線上預覽)**: [https://uptime.hihimonitor.win/](https://uptime.hihimonitor.win/)
+
 ## 系統特色
 
 - **零成本運行**：完全建立於 Cloudflare Free Tier (免費層) 之內。
