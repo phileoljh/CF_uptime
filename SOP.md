@@ -233,6 +233,11 @@ export default {
       return new Response(null, { status: 200 });
     }
 
+    // 忽略 favicon 請求，避免無謂消耗 D1 資源去渲染 HTML
+    if (url.pathname === '/favicon.ico') {
+      return new Response(null, { status: 404 });
+    }
+
     if (url.pathname === '/api/status') {
       return await handleApiStatus(env);
     }
@@ -257,6 +262,9 @@ export default {
       
       // 寫入快取，waitUntil 確保非同步寫入不會拖慢使用者的網頁載入
       ctx.waitUntil(cache.put(cacheKey, response.clone()));
+      console.log(`[D1 查詢] 快取未命中，從資料庫撈取資料: ${url.pathname}`);
+    } else {
+      console.log(`[CACHE HIT] 🚀 快取命中！0 消耗直接回傳: ${url.pathname}`);
     }
 
     return response;
