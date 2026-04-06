@@ -379,9 +379,14 @@ async function evaluateDebounce(site, result, lastLog, env) {
 }
 
 // ============================================================
-// Telegram 通知發送
+// 通知發送邏輯 (具備開關 Flag：Telegram / LINE 雙管道)
 // ============================================================
 async function sendAlert(env, site, alertType, result) {
+  // 旗標控制：telegram, line 或是 telegram,line 兩者並存
+  const channels = (env.ALERT_CHANNELS || 'telegram').toLowerCase();
+  const useTelegram = channels.includes('telegram');
+  const useLine = channels.includes('line');
+
   const isDown = alertType === 'ALERT_DOWN';
   const isLongDown = alertType === 'ALERT_LONG_DOWN';
   const timestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
@@ -406,9 +411,10 @@ async function sendAlert(env, site, alertType, result) {
     `🕐 時間：${timestamp}`,
   ].filter(Boolean).join('\n');
 
-  let success = false;
+  let anySuccess = false;
 
-  if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+  // 管道 A：Telegram
+  if (useTelegram && env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
     try {
       const res = await fetch(
         `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
@@ -422,16 +428,39 @@ async function sendAlert(env, site, alertType, result) {
           }),
         }
       );
-      success = res.ok;
+      if (res.ok) anySuccess = true;
       if (!res.ok) console.error(`[TELEGRAM] 失敗: ${res.status}`);
     } catch (err) {
       console.error(`[TELEGRAM] 異常: ${err.message}`);
     }
   }
 
+  // 管道 B：LINE Messaging API
+  if (useLine && env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_USER_ID) {
+    try {
+      // LINE 不支援 Markdown 星號，做簡單清理
+      const cleanMessage = message.replace(/\*/g, '');
+      const res = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`
+        },
+        body: JSON.stringify({
+          to: env.LINE_USER_ID,
+          messages: [{ type: 'text', text: cleanMessage }]
+        })
+      });
+      if (res.ok) anySuccess = true;
+      if (!res.ok) console.error(`[LINE] 失敗: ${res.status}`);
+    } catch (err) {
+      console.error(`[LINE] 異常: ${err.message}`);
+    }
+  }
+
   await env.DB.prepare(
     'INSERT INTO alert_history (site_id, alert_type, channel, message, success) VALUES (?, ?, ?, ?, ?)'
-  ).bind(site.id, alertType, 'telegram', message, success ? 1 : 0).run();
+  ).bind(site.id, alertType, channels, message, anySuccess ? 1 : 0).run();
 }
 
 // ============================================================
@@ -635,9 +664,11 @@ async function handleDeleteSite(url, env) {
 
 ---
 
-## 5. Phase 3：通知管道整合 (Telegram)
+## 5. Phase 3：通知管道整合 (雙方案自選)
 
-### 5.1 建立 Telegram Bot
+本系統支援 **Telegram** 與 **LINE Messaging API** 兩種報警方式。您可擇一設定，或兩者皆設，並在下一階段透過旗標切換。
+
+### 5.1 方案 A：Telegram 設定
 
 | 步驟 | 操作 |
 |------|------|
@@ -649,15 +680,13 @@ async function handleDeleteSite(url, env) {
 | 6 | 搜尋並打開 **@userinfobot** → 發送任意文字 → 取得你的 **Chat ID（數字）** |
 | 7 | 直接向你剛建立的 Bot 發送任意訊息（啟動對話，否則 Bot 無法主動傳訊給你） |
 
-### 5.2 驗證 Telegram 通知可運作（Dashboard 操作）
+在瀏覽器網址列輸入以下 URL 測試（替換真實值），成功代表管道正常：
+`https://api.telegram.org/bot<YOUR_TOKEN>/sendMessage?chat_id=<YOUR_CHAT_ID>&text=HihiMonitor+測試通知`
 
-在瀏覽器網址列輸入以下 URL 測試（替換真實值）：
+### 5.2 方案 B：LINE 設定
 
-```
-https://api.telegram.org/bot<YOUR_TOKEN>/sendMessage?chat_id=<YOUR_CHAT_ID>&text=HihiMonitor+測試通知
-```
-
-若 Telegram 成功收到訊息，代表管道正常。
+為保持教學單純，LINE 機器人的金鑰申請與設定步驟已獨立成冊。如果您選擇使用 LINE 來接收報警，請點擊參考同目錄下的設定手冊：
+👉 **[LINE Messaging API 報警設定手冊](./LINE_Setup.md)**
 
 ---
 
@@ -667,27 +696,30 @@ https://api.telegram.org/bot<YOUR_TOKEN>/sendMessage?chat_id=<YOUR_CHAT_ID>&text
 
 ### 6.1 設定非機敏環境變數 (純文字)
 
-這些變數用於控制系統邏輯，不具安全性風險。
+這些變數用於控制系統邏輯，不具安全性風險。這裡我們也設定「報警旗標」。
 
 1. 進入 Worker (`uptime-monitor`) → 上方 **Settings** 分頁
 2. 左側選擇 **Variables and Secrets** → 點擊右側的 **+ Add (新增)**
-3. 畫面右側滑出設定面板，依序新增以下兩筆（選 `Text` 類型）：
+3. 畫面右側滑出設定面板，依序新增以下三筆（皆選擇 `Text` 類型）：
 
 | Type (類型) | Variable name | Value | 說明 |
 |-------------|---------------|-------|------|
-| `Text` | `ALERT_COOLDOWN_MINUTES` | `30` | 同一網站報警冷卻時間（分鐘） |
-| `Text` | `DATA_RETENTION_DAYS`      | `90` | uptime_logs 保留天數 |
+| `Text` | `ALERT_CHANNELS`           | `telegram` | **報警旗標**！填入 `telegram` 或 `line`，或 `telegram,line` |
+| `Text` | `ALERT_COOLDOWN_MINUTES`   | `30`       | 同一網站報警冷卻時間（分鐘） |
+| `Text` | `DATA_RETENTION_DAYS`      | `90`       | uptime_logs 保留天數 |
 
 ### 6.2 設定機敏金鑰 (加密儲存)
 
-這是您的 Telegram 授權憑證，必須加密以防外洩。
+這是您的通訊軟體授權憑證，必須加密以防外洩。若您只選用一種報警管道，只需設定對應的變數即可。
 
-1. 繼續點擊下方的 **Add variable (新增變數)**，新增以下兩筆（選 `Secret` 類型）：
+1. 繼續點擊下方的 **Add variable (新增變數)**，依據您的需求設定以下值（請選 `Secret` 類型）：
 
 | Type (類型) | Variable name | Value | 說明 |
 |-------------|---------------|-------|------|
-| `Secret` | `TELEGRAM_BOT_TOKEN` | `123456789:ABCdef...` | @BotFather 給你的 Token |
-| `Secret` | `TELEGRAM_CHAT_ID`   | `987654321`           | 你的 Telegram User ID |
+| `Secret` | `TELEGRAM_BOT_TOKEN`        | (值) | [方案A] Telegram 的 API Token |
+| `Secret` | `TELEGRAM_CHAT_ID`          | (值) | [方案A] Telegram 的 Chat ID |
+| `Secret` | `LINE_CHANNEL_ACCESS_TOKEN` | (值) | [方案B] LINE Messaging API 長效 Token |
+| `Secret` | `LINE_USER_ID`              | (值) | [方案B] 您的 LINE User ID |
 
 2. 全部新增完成後，點擊 **Save and deploy (儲存並部署)**
 
