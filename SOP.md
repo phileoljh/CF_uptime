@@ -282,7 +282,7 @@ export default {
             'Cache-Control': 'no-cache, no-store'
           }
         });
-        console.log(`[STAMPEDE 防護] 搭便車！等候並共用渲染結果 (v${dbVersion})`);
+        console.log(`[STAMPEDE 防護] 搭便車！等候並共用渲染結果 (窗口 ${dbVersion})`);
       } else {
         // 自己是第一個發現快取過期的人，建立鎖並開始渲染
         const renderPromise = (async () => {
@@ -298,7 +298,7 @@ export default {
           });
           // 使用 await 確保快取確實寫入記憶體後再放行，保障後續併發
           await cache.put(cacheKey, cacheable);
-          console.log(`[D1 查詢] 偵測到新狀態 (v${dbVersion})，耗費 D1 重新渲染`);
+          console.log(`[D1 查詢] 新的 5 分鐘窗口 (${dbVersion})，重新渲染儀表板`);
           
           return htmlText; // 回傳字串供大家搭便車共用
         })();
@@ -318,11 +318,10 @@ export default {
         }
       }
     } else {
-      // 從快取提取出的 response 會帶有一小時的標頭，為了確保使用者按 F5 時，
-      // 必定會進來向 Worker 詢問最新版號，我們將回傳給瀏覽器的標頭改為防快取
+      // 同一 5 分鐘窗口內，直接從 Edge Cache 拿出已渲染的 HTML，完全不觸碰 D1
       response = new Response(response.body, response);
       response.headers.set('Cache-Control', 'no-cache, no-store');
-      console.log(`[CACHE HIT] 🚀 狀態無變更 (v${dbVersion})，僅耗 1 Read 直接回傳`);
+      console.log(`[CACHE HIT] 🚀 窗口未切換 (${dbVersion})，0 Read 直接回傳`);
     }
 
     return response;
