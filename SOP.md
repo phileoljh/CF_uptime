@@ -249,22 +249,39 @@ export default {
     }
 
     // ============================================================
-    // 實作 Cache API：快取 60 秒，有效降低高頻存取造成的 D1 讀取消耗
+    // 精準快取策略：讀取 D1 最新日誌 ID (僅耗 1 Read) 作為版本號
     // ============================================================
+    let dbVersion = '0';
+    try {
+      // 找出庫中最後一筆探測資料的 ID，當成全域狀態版本號 (極輕量查詢)
+      const latest = await env.DB.prepare('SELECT id FROM uptime_logs ORDER BY id DESC LIMIT 1').first();
+      dbVersion = latest ? latest.id.toString() : '0';
+    } catch(e) {}
+
     const cache = caches.default;
-    // 使用完整 URL 當作快取的鍵值 (Cache Key)
-    const cacheKey = new Request(url.toString(), request);
+    // 將 DB 版本號作為快取鍵，一旦排程寫入新資料，此 URL 就會變更，舊快取自然失效
+    const cacheKey = new Request(`https://internal.hihimonitor.local/dash?v=${dbVersion}`);
     let response = await cache.match(cacheKey);
 
     if (!response) {
-      // 若無快取或已過期，則向 D1 抓取資料並渲染畫面
+      // 真正完整讀取 D1 耗費資源的渲染函數
       response = await renderDashboard(env);
       
-      // 寫入快取，waitUntil 確保非同步寫入不會拖慢使用者的網頁載入
-      ctx.waitUntil(cache.put(cacheKey, response.clone()));
-      console.log(`[D1 查詢] 快取未命中，從資料庫撈取資料: ${url.pathname}`);
+      // 複製一份用於內部邊緣快取，並強制存活 1 小時 (由版本號判定過期，非秒數)
+      const cacheable = new Response(response.clone().body, {
+        headers: {
+          'Content-Type': 'text/html;charset=UTF-8',
+          'Cache-Control': 'max-age=3600'
+        }
+      });
+      ctx.waitUntil(cache.put(cacheKey, cacheable));
+      console.log(`[D1 查詢] 偵測到新狀態 (v${dbVersion})，耗費 D1 重新渲染`);
     } else {
-      console.log(`[CACHE HIT] 🚀 快取命中！0 消耗直接回傳: ${url.pathname}`);
+      // 從快取提取出的 response 會帶有一小時的標頭，為了確保使用者按 F5 時，
+      // 必定會進來向 Worker 詢問最新版號，我們將回傳給瀏覽器的標頭改為防快取
+      response = new Response(response.body, response);
+      response.headers.set('Cache-Control', 'no-cache, no-store');
+      console.log(`[CACHE HIT] 🚀 狀態無變更 (v${dbVersion})，僅耗 1 Read 直接回傳`);
     }
 
     return response;
@@ -555,8 +572,7 @@ async function renderDashboard(env) {
   return new Response(buildHTML(siteData, alerts, env), {
     headers: {
       'Content-Type': 'text/html;charset=UTF-8',
-      // 設定 Cache-Control，讓 caches.default.put() 自動擷取此秒數作為快取存活期，也允許瀏覽器做對應秒數的快取
-      'Cache-Control': 'public, s-maxage=60, max-age=60',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
     },
   });
 }
