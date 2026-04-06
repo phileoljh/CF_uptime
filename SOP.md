@@ -223,6 +223,9 @@ INSERT INTO sites (name, url) VALUES
 // 部署方式：直接貼入 CF Workers Dashboard 線上編輯器
 // ============================================================
 
+// 全域渲染鎖 (防止 Cache Stampede 快取雪崩效應)
+const renderLocks = new Map();
+
 export default {
   // ── HTTP 請求處理（儀表板 + API）
   async fetch(request, env, ctx) {
@@ -264,18 +267,38 @@ export default {
     let response = await cache.match(cacheKey);
 
     if (!response) {
-      // 真正完整讀取 D1 耗費資源的渲染函數
-      response = await renderDashboard(env);
-      
-      // 複製一份用於內部邊緣快取，並強制存活 1 小時 (由版本號判定過期，非秒數)
-      const cacheable = new Response(response.clone().body, {
-        headers: {
-          'Content-Type': 'text/html;charset=UTF-8',
-          'Cache-Control': 'max-age=3600'
+      const cacheKeyUrl = cacheKey.url;
+      if (renderLocks.has(cacheKeyUrl)) {
+        // 【防雪崩機制】若已有併發請求正在渲染此版本，直接等待共享結果，避免重複查庫
+        const sharedResponse = await renderLocks.get(cacheKeyUrl);
+        response = sharedResponse.clone();
+        console.log(`[STAMPEDE 防護] 搭便車！等候並共用渲染結果 (v${dbVersion})`);
+      } else {
+        // 自己是第一個發現快取過期的人，建立鎖並開始渲染
+        const renderPromise = (async () => {
+          const res = await renderDashboard(env);
+          
+          const cacheable = new Response(res.clone().body, {
+            headers: {
+              'Content-Type': 'text/html;charset=UTF-8',
+              'Cache-Control': 'max-age=3600'
+            }
+          });
+          // 使用 await 確保快取確實寫入硬碟後再放行，保障後續併發
+          await cache.put(cacheKey, cacheable);
+          console.log(`[D1 查詢] 偵測到新狀態 (v${dbVersion})，耗費 D1 重新渲染`);
+          return res;
+        })();
+        
+        renderLocks.set(cacheKeyUrl, renderPromise);
+        
+        try {
+          const sharedResponse = await renderPromise;
+          response = sharedResponse.clone();
+        } finally {
+          renderLocks.delete(cacheKeyUrl); // 快取完畢後解除鎖定
         }
-      });
-      ctx.waitUntil(cache.put(cacheKey, cacheable));
-      console.log(`[D1 查詢] 偵測到新狀態 (v${dbVersion})，耗費 D1 重新渲染`);
+      }
     } else {
       // 從快取提取出的 response 會帶有一小時的標頭，為了確保使用者按 F5 時，
       // 必定會進來向 Worker 詢問最新版號，我們將回傳給瀏覽器的標頭改為防快取
