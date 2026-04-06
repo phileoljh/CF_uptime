@@ -1,28 +1,27 @@
 # =============================================================
 # HihiMonitor — wrangler.toml
-#
-# ⚠️ 此檔案僅作「設定參考」與版控記錄用途。
-#    本專案採 Cloudflare Dashboard UI 直接操作，不需本地執行 Wrangler。
-#    以下所有設定均需在 Dashboard 對應頁面手動設定（見 SOP.md）。
 # =============================================================
 
 name = "uptime-monitor"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# ── Cron 排程（Dashboard: Worker → Settings → Triggers）──────
-# */5 * * * *   → 每 5 分鐘健康檢查
-# 0 19 * * *    → UTC 19:00 = 台灣時間 03:00，資料清理
+# ── D1 資料庫綁定 ──
+[[d1_databases]]
+binding = "DB"
+database_name = "uptime-monitor-db"
+database_id = "d0ded441-7b10-4b82-a63b-0e764d39d0c5"
 
-# ── D1 資料庫綁定（Dashboard: Worker → Settings → Bindings）──
-# Binding Variable name：DB
-# D1 Database：uptime-monitor-db
+# ── 環境變數 ──
+[vars]
+ALERT_COOLDOWN_MINUTES = "30"
+DATA_RETENTION_DAYS = "90"
+LONG_DOWN_HOURS = "8"
+ALERT_CHANNELS = "line"
 
-# ── 環境變數（Dashboard: Worker → Settings → Environment Variables）
-# ALERT_COOLDOWN_MINUTES = 30
-# DATA_RETENTION_DAYS    = 90
-# LONG_DOWN_HOURS        = 8
+# ── Cron 排程 ──
+[triggers]
+crons = ["*/5 * * * *", "0 19 * * *"]
 
-# ── 機敏 Secrets（Dashboard: Environment Variables → 勾選 Encrypt）
-# TELEGRAM_BOT_TOKEN  → 加密儲存
-# TELEGRAM_CHAT_ID    → 加密儲存
+# ── 備註 ──
+# TELEGRAM_BOT_TOKEN 等敏感資訊應透過 Dashbord Secret 設定，不可寫入此處。
