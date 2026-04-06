@@ -263,7 +263,8 @@ export default {
     // 效果：在同一個 5 分鐘內（例如 22:30 ~ 22:35），所有請求的版本號完全一致，
     // 保障 Stampede 防護有效運作，且排程每 5 分鐘產生新資料後，版本號自然遞進，
     // 完美觸發快取更新。此方法完全免除對 D1 的版本查詢，節省 1 Read/request。
-    const nowMinuteSlot = Math.floor(Date.now() / (5 * 60 * 1000)); // 每 5 分鐘換一格
+    // 延後 1 分鐘切換窗口，確保 Cron 健康檢查 (約 40-60s) 已完成，避免快取到舊資料
+    const nowMinuteSlot = Math.floor((Date.now() - 60 * 1000) / (5 * 60 * 1000));
     const dbVersion = nowMinuteSlot.toString();
 
     const cache = caches.default;
