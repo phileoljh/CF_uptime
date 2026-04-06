@@ -580,7 +580,7 @@ async function renderDashboard(env) {
   const siteData = [];
   for (const site of sites) {
     const { results: logs } = await env.DB.prepare(
-      'SELECT status, latency_ms, timestamp FROM uptime_logs WHERE site_id = ? ORDER BY timestamp DESC LIMIT 40'
+      'SELECT status, latency_ms, timestamp FROM uptime_logs WHERE site_id = ? ORDER BY timestamp DESC LIMIT 72'
     ).bind(site.id).all();
 
     const { results: stats } = await env.DB.prepare(
