@@ -269,32 +269,45 @@ export default {
     if (!response) {
       const cacheKeyUrl = cacheKey.url;
       if (renderLocks.has(cacheKeyUrl)) {
-        // 【防雪崩機制】若已有併發請求正在渲染此版本，直接等待共享結果，避免重複查庫
-        const sharedResponse = await renderLocks.get(cacheKeyUrl);
-        response = sharedResponse.clone();
+        // 【防雪崩機制】若已有併發請求正在渲染，改為直接等待共享純字串，避免 I/O 跨域衝突
+        const sharedHtml = await renderLocks.get(cacheKeyUrl);
+        response = new Response(sharedHtml, {
+          headers: {
+            'Content-Type': 'text/html;charset=UTF-8',
+            'Cache-Control': 'no-cache, no-store'
+          }
+        });
         console.log(`[STAMPEDE 防護] 搭便車！等候並共用渲染結果 (v${dbVersion})`);
       } else {
         // 自己是第一個發現快取過期的人，建立鎖並開始渲染
         const renderPromise = (async () => {
           const res = await renderDashboard(env);
+          // 關鍵修正：將 Response 轉為純粹的字串 (String)，因為純字串可以安全地在多次併發連線間共享
+          const htmlText = await res.text();
           
-          const cacheable = new Response(res.clone().body, {
+          const cacheable = new Response(htmlText, {
             headers: {
               'Content-Type': 'text/html;charset=UTF-8',
               'Cache-Control': 'max-age=3600'
             }
           });
-          // 使用 await 確保快取確實寫入硬碟後再放行，保障後續併發
+          // 使用 await 確保快取確實寫入記憶體後再放行，保障後續併發
           await cache.put(cacheKey, cacheable);
           console.log(`[D1 查詢] 偵測到新狀態 (v${dbVersion})，耗費 D1 重新渲染`);
-          return res;
+          
+          return htmlText; // 回傳字串供大家搭便車共用
         })();
         
         renderLocks.set(cacheKeyUrl, renderPromise);
         
         try {
-          const sharedResponse = await renderPromise;
-          response = sharedResponse.clone();
+          const sharedHtml = await renderPromise;
+          response = new Response(sharedHtml, {
+            headers: {
+              'Content-Type': 'text/html;charset=UTF-8',
+              'Cache-Control': 'no-cache, no-store'
+            }
+          });
         } finally {
           renderLocks.delete(cacheKeyUrl); // 快取完畢後解除鎖定
         }
