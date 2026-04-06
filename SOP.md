@@ -262,8 +262,8 @@ export default {
     } catch(e) {}
 
     const cache = caches.default;
-    // 將 DB 版本號作為快取鍵，一旦排程寫入新資料，此 URL 就會變更，舊快取自然失效
-    const cacheKey = new Request(`https://internal.hihimonitor.local/dash?v=${dbVersion}`);
+    // 修正：必須使用屬於自己網域的 Origin，若用假網域可能會被 Cloudflare 視為無效資源而提早清掉
+    const cacheKey = new Request(`${url.origin}/_internal_dash_cache?v=${dbVersion}`);
     let response = await cache.match(cacheKey);
 
     if (!response) {
@@ -288,7 +288,7 @@ export default {
           const cacheable = new Response(htmlText, {
             headers: {
               'Content-Type': 'text/html;charset=UTF-8',
-              'Cache-Control': 'max-age=3600'
+              'Cache-Control': 'public, max-age=3600, s-maxage=3600'
             }
           });
           // 使用 await 確保快取確實寫入記憶體後再放行，保障後續併發
@@ -617,7 +617,8 @@ function buildHTML(sites, alerts, env) {
   const cards = sites.map(site => {
     const dots = site.logs.map(log => {
       const c = log.status === 'ALIVE' ? '#10b981' : '#ef4444';
-      return `<span class="dot" style="background:${c}" title="${log.timestamp} ${log.status} ${log.latency_ms}ms"></span>`;
+      const twTime = new Date(log.timestamp + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+      return `<span class="dot" style="background:${c}" title="${twTime} ${log.status} ${log.latency_ms}ms"></span>`;
     }).join('');
 
     const isAlive = site.last_stable_status === 'ALIVE';
