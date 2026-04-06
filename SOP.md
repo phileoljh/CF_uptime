@@ -252,17 +252,22 @@ export default {
     }
 
     // ============================================================
-    // 精準快取策略：讀取 D1 最新日誌 ID (僅耗 1 Read) 作為版本號
+    // 快取策略：以「5 分鐘時間窗口」作為版本號
     // ============================================================
-    let dbVersion = '0';
-    try {
-      // 找出庫中最後一筆探測資料的 ID，當成全域狀態版本號 (極輕量查詢)
-      const latest = await env.DB.prepare('SELECT id FROM uptime_logs ORDER BY id DESC LIMIT 1').first();
-      dbVersion = latest ? latest.id.toString() : '0';
-    } catch(e) {}
+    // 【設計考量】原本使用 D1 最新 ID 作為版本號，但 Cron 執行健康檢查時，
+    // 會在短短數秒內連續寫入多筆資料，導致 ID 快速跳動 (v836→v837→v839...)。
+    // 若多個 F5 請求恰好在 Cron 執行期間進來，每個請求拿到的「最新 ID」都不同，
+    // Stampede 防護因此失效，每個請求都各自觸發 D1 全量重渲染（競態條件 Race Condition）。
+    //
+    // 解決方案：改用「UTC 分鐘數 ÷ 5 取整數」當作版本號。
+    // 效果：在同一個 5 分鐘內（例如 22:30 ~ 22:35），所有請求的版本號完全一致，
+    // 保障 Stampede 防護有效運作，且排程每 5 分鐘產生新資料後，版本號自然遞進，
+    // 完美觸發快取更新。此方法完全免除對 D1 的版本查詢，節省 1 Read/request。
+    const nowMinuteSlot = Math.floor(Date.now() / (5 * 60 * 1000)); // 每 5 分鐘換一格
+    const dbVersion = nowMinuteSlot.toString();
 
     const cache = caches.default;
-    // 修正：必須使用屬於自己網域的 Origin，若用假網域可能會被 Cloudflare 視為無效資源而提早清掉
+    // 使用真實網域的 Origin 作為快取 Key 基底，確保受 Cloudflare Zone 管理
     const cacheKey = new Request(`${url.origin}/_internal_dash_cache?v=${dbVersion}`);
     let response = await cache.match(cacheKey);
 
