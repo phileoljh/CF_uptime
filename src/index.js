@@ -567,8 +567,8 @@ function withSecurityHeaders(response) {
   newResponse.headers.set('X-Content-Type-Options', 'nosniff');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   
-  // CSP: 限制資源來源，允許 Google Fonts 與內聯樣式 (因儀表板點點使用 style 屬性)
-  const csp = "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;";
+  // CSP: 限制資源來源，允許 Google Fonts、Cloudflare 分析腳本與內聯樣式 (含 Web Worker 與 Beacon)
+  const csp = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; worker-src 'self' blob:;";
   newResponse.headers.set('Content-Security-Policy', csp);
   
   return newResponse;
