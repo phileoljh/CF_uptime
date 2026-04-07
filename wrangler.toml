@@ -15,7 +15,7 @@ database_id = "d0ded441-7b10-4b82-a63b-0e764d39d0c5"
 # ── 環境變數 ──
 [vars]
 ALERT_COOLDOWN_MINUTES = "30"
-DATA_RETENTION_DAYS = "90"
+DATA_RETENTION_DAYS = "7"
 LONG_DOWN_HOURS = "8"
 ALERT_CHANNELS = "line"
 
