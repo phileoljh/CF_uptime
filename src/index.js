@@ -11,7 +11,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // ── [新增] 惡意掃描攔截邏輯 (方案二) ──
+    // ── [新增] 資源耗盡與限流防護 (Rate Limiting) ──
+    const rateLimitRes = await checkRateLimit(request, env);
+    if (rateLimitRes) return withSecurityHeaders(rateLimitRes);
+    // ──────────────────────────────────────────────
+
+    // ── [新增] 惡意掃閱攔截邏輯 (方案二) ──
     // 條件一：判斷是否為非標準的 Port (通訊埠)
     const isUnusualPort = url.port !== "" && url.port !== "80" && url.port !== "443";
     
@@ -593,4 +598,64 @@ function escapeHTML(str) {
 function verifyCsrf(request) {
   // 非同源的請求無法在未觸發 CORS 預檢的情況下帶入此自定義標頭
   return request.headers.get('X-Requested-With') === 'HihiMonitor';
+}
+
+/**
+ * 資源耗盡與限流防護 (利用 Cache API 實作零成本計數)
+ */
+async function checkRateLimit(request, env) {
+  const ip = request.headers.get('CF-Connecting-IP');
+  if (!ip) return null; // 靈魂偵測失敗則跳過
+
+  const url = new URL(request.url);
+  const isApiRequest = request.method !== 'GET' || url.pathname.startsWith('/api/');
+  const type = isApiRequest ? 'api' : 'dash';
+
+  // 門檻設定：優先讀取環境變數，預設為 Dash 30/min, API 10/min
+  const threshold = parseInt(isApiRequest ? (env.RATE_LIMIT_API || '10') : (env.RATE_LIMIT_DASH || '30'));
+  
+  const cache = caches.default;
+  const baseUrl = `http://ratelimit.local/${type}/${ip}`;
+  
+  // 1. 檢查是否存在「封鎖標記」 (Block Flag)
+  const blockKey = new Request(`${baseUrl}/blocked`);
+  const isBlocked = await cache.match(blockKey);
+  if (isBlocked) {
+    return new Response('Too Many Requests (IP Blocked for 1m)', { 
+      status: 429,
+      headers: { 'Retry-After': '60' }
+    });
+  }
+
+  // 2. 檢查/更新「計數器」 (Counter)
+  const countKey = new Request(`${baseUrl}/count`);
+  const cachedRes = await cache.match(countKey);
+  
+  let currentCount = 0;
+  if (cachedRes) {
+    currentCount = parseInt(await cachedRes.text()) || 0;
+  }
+
+  if (currentCount >= threshold) {
+    // 觸發封鎖：寫入一個 60 秒過期的封鎖標記
+    const blockRes = new Response('blocked', {
+      headers: { 'Cache-Control': 'max-age=60, s-maxage=60' }
+    });
+    // 使用 waitUntil 異步寫入，不阻塞主流程
+    // 注意：在 fetch 中 ctx 可能不直接傳入，但可利用 request.signal 或直接 await
+    await cache.put(blockKey, blockRes);
+    
+    return new Response('Too Many Requests (Rate limit exceeded)', { 
+      status: 429,
+      headers: { 'Retry-After': '60' }
+    });
+  }
+
+  // 更新計數：s-maxage=60 代表每一分鐘重置一次窗口
+  const nextCountRes = new Response((currentCount + 1).toString(), {
+    headers: { 'Cache-Control': 'max-age=60, s-maxage=60' }
+  });
+  await cache.put(countKey, nextCountRes);
+
+  return null;
 }
