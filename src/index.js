@@ -10,7 +10,20 @@ export default {
   // ── HTTP 請求處理（儀表板 + API）
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    
+    // ── [新增] 惡意掃描攔截邏輯 (方案二) ──
+    // 條件一：判斷是否為非標準的 Port (通訊埠)
+    const isUnusualPort = url.port !== "" && url.port !== "80" && url.port !== "443";
+    
+    // 條件二：判斷路徑是否以 "/." 開頭 (涵蓋 /.git, /.env 等隱藏檔)
+    const isHiddenFile = url.pathname.startsWith('/.');
 
+    // 若符合任一惡意特徵，直接 301 永久重新導向 (Redirect) 至首頁
+    if (isUnusualPort || isHiddenFile) {
+      return Response.redirect("https://uptime.hihimonitor.win/", 301);
+    }
+    // ─────────────────────────────────────
+    
     // 針對 HEAD 探測直接回傳 200，避免觸發儀表板渲染耗費 D1 讀取資源
     if (request.method === 'HEAD') {
       return new Response(null, { status: 200 });
