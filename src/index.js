@@ -378,7 +378,7 @@ async function cleanupOldData(env) {
 // 儀表板 HTML 渲染
 // ============================================================
 async function renderDashboard(env) {
-  const { results: sites } = await env.DB.prepare('SELECT * FROM sites ORDER BY id').all();
+  const { results: sites } = await env.DB.prepare('SELECT * FROM sites WHERE is_active = 1 ORDER BY id').all();
 
   const siteData = [];
   for (const site of sites) {

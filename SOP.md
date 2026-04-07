@@ -18,12 +18,13 @@
 6. [Phase 4：環境變數與 Secrets 設定](#6-phase-4環境變數與-secrets-設定)
 7. [Phase 5：Cron Trigger 設定](#7-phase-5cron-trigger-設定)
 8. [Phase 6：Zero Trust 安全防護](#8-phase-6zero-trust-安全防護)
-9. [Phase 7：驗證與上線確認](#9-phase-7驗證與上線確認)
-10. [Phase 8：日常維運與資料治理](#10-phase-8日常維運與資料治理)
-11. [Phase 9：GitHub 自動校驗與部署 (CI/CD)](#11-phase-9github-自動校驗與部署-cicd)
-12. [Gap 補完：原始設計不足之處與補強](#12-gap-補完原始設計不足之處與補強)
-13. [故障排除 (Troubleshooting)](#13-故障排除-troubleshooting)
-14. [附錄](#14-附錄)
+9. [Phase 7：惡意掃描與 DDoS 主動防禦](#9-phase-7惡意掃描與-ddos-主動防禦)
+10. [Phase 8：驗證與上線確認](#10-phase-8驗證與上線確認)
+11. [Phase 9：日常維運與資料治理](#11-phase-9日常維運與資料治理)
+12. [Phase 10：GitHub 自動校驗與部署 (CI/CD)](#12-phase-10github-自動校驗與部署-cicd)
+13. [Gap 補完：原始設計不足之處與補強](#13-gap-補完原始設計不足之處與補強)
+14. [故障排除 (Troubleshooting)](#14-故障排除-troubleshooting)
+15. [附錄](#15-附錄)
 
 ---
 
@@ -70,6 +71,7 @@
 |------|------|
 | **防抖優先** | 任何狀態變更需連續兩次確認 (ADD/DAA) 後才發送通知，避免暫時性波動誤報 |
 | **零信任安全** | 儀表板由 Cloudflare Access 閘道保護，Worker 程式碼無需自行實作驗證邏輯 |
+| **掃描攔截** | [新增] 主動識別非標準 Port 與隱藏路徑 (如 `/.git`) 的請求，並自動進行 301 重新導向 |
 | **資料自治** | 所有紀錄儲存於 D1，Cron 自動輪替超過 90 天的舊資料 |
 | **通知可靠** | Telegram Bot 即時推播為主管道，Email 管道預留待 API GA 後啟用 |
 | **容錯隔離** | 單一網站的檢查失敗不影響其他網站的探測流程 |
@@ -221,7 +223,7 @@ INSERT INTO sites (name, url) VALUES
 3. **貼入** [src/index.js](./src/index.js) 之完整原始碼。
 4. 點擊右上角 **Save and Deploy** 完成初次部署。
 
-> ✅ **進階**：若您希望之後能透過 GitHub 自動更新，請跳至 [Phase 9](#11-phase-9github-自動校驗與部署-cicd)。
+> ✅ **進階**：若您希望之後能透過 GitHub 自動更新，請跳至 [Phase 10](#12-phase-10github-自動校驗與部署-cicd)。
 
 ---
 
@@ -380,9 +382,43 @@ INSERT INTO sites (name, url) VALUES
 
 ---
 
-## 9. Phase 7：驗證與上線確認
+## 9. Phase 7：惡意掃描與 DDoS 主動防禦
 
-### 9.1 上線前檢查清單
+> 💡 **設計理念**：Worker 除了處理正常監控與儀表板請求外，身為對外門面，常會遭遇自動化腳本的「惡意掃描」 (Malicious Scanning)。本階段透過程式碼邏輯實現兩項主動防禦機制。
+
+### 9.1 攔截邏輯說明
+
+在 `src/index.js` 的 `fetch` handler 中，系統會針對每一筆傳入請求進行過濾：
+
+| 檢查條件 | 攔截對象 | 處理動作 |
+|----------|----------|----------|
+| **非標準 Port** | 偵測非 `80` 或 `443` 的通訊埠請求 | 直接 301 重導向至首頁 |
+| **隱藏檔案路徑** | 偵測以 `/.` 開頭的請求 (例如 `/.git`, `/.env`) | 直接 301 重導向至首頁 |
+
+### 9.2 重點代碼解析 (Security Logic)
+
+```javascript
+// 判斷是否為非標準的 Port (防止惡意通訊埠掃描)
+const isUnusualPort = url.port !== "" && url.port !== "80" && url.port !== "443";
+
+// 判斷路徑是否以 "/." 開頭 (防止隱藏檔/設定檔外流)
+const isHiddenFile = url.pathname.startsWith('/.');
+
+if (isUnusualPort || isHiddenFile) {
+  return Response.redirect("https://uptime.hihimonitor.win/", 301);
+}
+```
+
+### 9.3 效能與安全優勢
+
+1. **節省 D1 資源**：惡意請求在進入 D1 查詢之前就已被攔截並轉走，降低資料庫負擔。
+2. **降低攻擊者興趣**：透過 301 重導向至合法首頁，讓掃描工具無法獲取有效的 404 或 403 報錯，增加惡意掃描的難度。
+
+---
+
+## 10. Phase 8：驗證與上線確認
+
+### 10.1 上線前檢查清單
 
 ```
 □ D1 資料庫已建立，Schema 已執行，初始站點已寫入
@@ -402,13 +438,13 @@ INSERT INTO sites (name, url) VALUES
 □ 儀表板 URL 可正常開啟並顯示站點卡片
 ```
 
-### 9.2 驗證儀表板可用
+### 10.2 驗證儀表板可用
 
 - 開啟 `https://uptime-monitor.<your-account>.workers.dev`
 - 若出現 Cloudflare Access 登入頁面：輸入你的 Email → 收 OTP → 登入
 - 登入後應看到 3 個監控站點卡片
 
-### 9.3 (選用) 綁定自訂域名
+### 10.3 (選用) 綁定自訂域名
 
 1. **Workers & Pages** → `uptime-monitor` → **Settings** → **Domains & Routes**
 2. 點擊 **Add Custom Domain**
@@ -428,9 +464,9 @@ INSERT INTO sites (name, url) VALUES
 
 ---
 
-## 10. Phase 8：日常維運與資料治理
+## 11. Phase 9：日常維運與資料治理
 
-### 10.1 日常巡檢事項
+### 11.1 日常巡檢事項
 
 | 頻率 | 項目 | 操作位置 |
 |------|------|----------|
@@ -441,7 +477,7 @@ INSERT INTO sites (name, url) VALUES
 | **有需要時** | 新增監控站點 | D1 Console 直接 INSERT，或呼叫 POST /api/sites |
 | **有需要時** | 停用監控站點 | D1 Console 執行 `UPDATE sites SET is_active=0 WHERE id=?` |
 
-### 10.2 D1 Console 常用維運指令
+### 11.2 D1 Console 常用維運指令
 
 ```sql
 -- 查看所有監控站點狀態
@@ -479,7 +515,7 @@ WHERE l.timestamp > datetime('now', '-1 day')
 GROUP BY s.id, s.name;
 ```
 
-### 10.3 D1 Free Tier 額度評估
+### 11.3 D1 Free Tier 額度評估
 
 | 資源 | Free Tier 限制 | 系統預估（10 站 / 每 5 分鐘） |
 |------|----------------|-------------------------------|
@@ -490,16 +526,16 @@ GROUP BY s.id, s.name;
 
 ---
 
-## 11. Phase 9：GitHub 自動校驗與部署 (CI/CD)
+## 12. Phase 10：GitHub 自動校驗與部署 (CI/CD)
 
 > 🚀 **推薦方案**：為了實現真正的「自動化」與「版本控管」，建議將此 Worker 連接至您的 GitHub 儲存庫。
 
-### 11.1 為什麼需要自動部署？
+### 12.1 為什麼需要自動部署？
 - **防錯**：GitHub 本身具備版本紀錄，可隨時回滾舊版。
 - **省力**：您在本地（或透過我）修改 `src/index.js` 並 Push 到 GitHub 後，Cloudflare 會自動執行部署。
 - **一致性**：確保線上代碼與 Git 儲存庫始終同步。
 
-### 11.2 設定步驟 (Dashboard 操作)
+### 12.2 設定步驟 (Dashboard 操作)
 
 1. 進入 **Cloudflare Dashboard** → **Workers & Pages** → 選擇 `uptime-monitor`。
 2. 點擊上方 **Settings** 分頁 → 左側選單選擇 **Builds**。
@@ -516,9 +552,9 @@ GROUP BY s.id, s.name;
 
 ---
 
-## 12. Gap 補完：原始設計不足之處與補強
+## 13. Gap 補完：原始設計不足之處與補強
 
-### 12.1 已補強項目
+### 13.1 已補強項目
 
 | # | 缺失項目 | 風險 | 本 SOP 補強方式 |
 |---|----------|------|-----------------|
@@ -534,10 +570,10 @@ GROUP BY s.id, s.name;
 | 10 | Schema 缺少欄位 | 無從記錄錯誤原因與檢查設定 | 新增 `check_method`、`timeout_ms`、`error_msg`、`status_code` 等 |
 | 11 | `sites.url` 無唯一約束 | 可能重複新增同一網站 | 加入 `UNIQUE` 約束 |
 | 12 | 資料清理 Cron 時區錯誤 | 凌晨 3 點實際應設 UTC 19:00 | 修正為 `0 19 * * *` 並說明原因 |
-| 13 | 無本地 CLI 替代方案 | 須安裝 Node.js/Wrangler 才能操作 | **全面改為 Dashboard UI 操作**（本次修訂核心） |
 | 14 | 無維運 SQL 查詢腳本 | 日常巡檢無工具可用 | 新增 D1 Console 常用查詢集 |
+| 15 | 無防禦掃描機制 | 容易被 `.git` 等掃描工具浪費資源 | **[新增] 加入 Port 與隱藏路徑攔截邏輯** |
 
-### 12.2 未來 Phase 2 擴充 Roadmap
+### 13.2 未來 Phase 2 擴充 Roadmap
 
 | 優先序 | 項目 | 技術說明 |
 |--------|------|----------|
@@ -550,9 +586,9 @@ GROUP BY s.id, s.name;
 
 ---
 
-## 13. 故障排除 (Troubleshooting)
+## 14. 故障排除 (Troubleshooting)
 
-### 13.1 常見問題對照表
+### 14.1 常見問題對照表
 
 | 問題現象 | 可能原因 | 解決方式（純 Dashboard） |
 |----------|----------|--------------------------|
@@ -565,7 +601,7 @@ GROUP BY s.id, s.name;
 | 報警持續重複發送 | 冷卻機制未生效 | 確認 `ALERT_COOLDOWN_MINUTES` 環境變數已儲存 |
 | Worker 儲存失敗 | 程式碼語法錯誤 | Dashboard 編輯器底部有語法錯誤提示 |
 
-### 13.2 Telegram Bot 診斷（瀏覽器直接測試）
+### 14.2 Telegram Bot 診斷（瀏覽器直接測試）
 
 在瀏覽器網址列輸入（替換實際值）：
 
@@ -577,7 +613,7 @@ https://api.telegram.org/bot<TOKEN>/getMe
 https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=測試訊息
 ```
 
-### 13.3 D1 Console 診斷查詢
+### 14.3 D1 Console 診斷查詢
 
 ```sql
 -- 確認資料表已建立
@@ -593,7 +629,7 @@ SELECT * FROM alert_history WHERE success = 0 ORDER BY timestamp DESC LIMIT 5;
 
 ---
 
-## 14. 附錄
+## 15. 附錄
 
 ### 附錄 A：防抖邏輯狀態機（ADD / DAA）
 
