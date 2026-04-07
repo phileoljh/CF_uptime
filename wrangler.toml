@@ -23,5 +23,9 @@ ALERT_CHANNELS = "line"
 [triggers]
 crons = ["*/5 * * * *", "0 19 * * *"]
 
+# ── 觀測系統 (Logs) ──
+[observability]
+enabled = true
+
 # ── 備註 ──
 # TELEGRAM_BOT_TOKEN 等敏感資訊應透過 Dashbord Secret 設定，不可寫入此處。
