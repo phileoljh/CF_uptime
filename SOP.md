@@ -574,6 +574,7 @@ GROUP BY s.id, s.name;
 | 15 | 無防禦掃描機制 | 容易被 `.git` 等掃描工具浪費資源 | **[新增] 加入 Port 與隱藏路徑攔截邏輯** |
 | 16 | 無 XSS 防護 | 站點名稱若存入惡意腳本將導致管理員受害 | **[新增] 實作 `escapeHTML` 對所有輸出進行轉義** |
 | 17 | 無 HTTP 安全標頭 | 容易遭受點擊劫持、MIME 嗅探等攻擊 | **[新增] 實作 `withSecurityHeaders` 強制套用 CSP, HSTS 等標頭** |
+| 18 | 無 CSRF 防護 | 外部惡意網站可能觸發新增/刪除站點 API | **[新增] 實作 `verifyCsrf` 並對異動 API 強制檢查自定義標頭** |
 
 ### 13.2 未來 Phase 2 擴充 Roadmap
 

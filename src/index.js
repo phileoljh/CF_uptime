@@ -40,7 +40,7 @@ export default {
     if (url.pathname === '/api/sites' && request.method === 'POST') {
       return withSecurityHeaders(await handleAddSite(request, env));
     }    if (url.pathname.startsWith('/api/sites/') && request.method === 'DELETE') {
-      return withSecurityHeaders(await handleDeleteSite(url, env));
+      return withSecurityHeaders(await handleDeleteSite(url, env, request));
     }
 
     // ============================================================
@@ -532,6 +532,10 @@ async function handleApiStatus(env) {
 }
 
 async function handleAddSite(request, env) {
+  // CSRF 防護：強制檢查自定義標頭
+  if (!verifyCsrf(request)) {
+    return Response.json({ error: 'CSRF 驗證失敗：缺少必要的安全標頭' }, { status: 403 });
+  }
   try {
     const { name, url } = await request.json();
     if (!name || !url) return Response.json({ error: 'name 和 url 為必填' }, { status: 400 });
@@ -542,7 +546,11 @@ async function handleAddSite(request, env) {
   }
 }
 
-async function handleDeleteSite(url, env) {
+async function handleDeleteSite(url, env, request) {
+  // CSRF 防護：強制檢查自定義標頭 (DELETE 亦須校驗)
+  if (!verifyCsrf(request)) {
+    return Response.json({ error: 'CSRF 驗證失敗：缺少必要的安全標頭' }, { status: 403 });
+  }
   const id = url.pathname.split('/').pop();
   await env.DB.prepare('UPDATE sites SET is_active=0 WHERE id=?').bind(id).run();
   return Response.json({ success: true });
@@ -577,4 +585,12 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * CSRF 驗證 (防範跨站請求偽造)
+ */
+function verifyCsrf(request) {
+  // 非同源的請求無法在未觸發 CORS 預檢的情況下帶入此自定義標頭
+  return request.headers.get('X-Requested-With') === 'HihiMonitor';
 }
