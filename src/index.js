@@ -621,6 +621,7 @@ async function checkRateLimit(request, env) {
   const blockKey = new Request(`${baseUrl}/blocked`);
   const isBlocked = await cache.match(blockKey);
   if (isBlocked) {
+    console.log(`[RATE LIMIT] 🛑 IP ${ip} 仍在封鎖期間 (Type: ${type})`);
     return new Response('Too Many Requests (IP Blocked for 1m)', { 
       status: 429,
       headers: { 'Retry-After': '60' }
@@ -637,6 +638,7 @@ async function checkRateLimit(request, env) {
   }
 
   if (currentCount >= threshold) {
+    console.warn(`[RATE LIMIT] 🚫 IP ${ip} 觸發限流封鎖 (Type: ${type}, Count: ${currentCount + 1}/${threshold})`);
     // 觸發封鎖：寫入一個 60 秒過期的封鎖標記
     const blockRes = new Response('blocked', {
       headers: { 'Cache-Control': 'max-age=60, s-maxage=60' }
