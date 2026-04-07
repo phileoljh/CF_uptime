@@ -20,28 +20,27 @@ export default {
 
     // 若符合任一惡意特徵，直接 301 永久重新導向 (Redirect) 至首頁
     if (isUnusualPort || isHiddenFile) {
-      return Response.redirect("https://uptime.hihimonitor.win/", 301);
+      return withSecurityHeaders(Response.redirect("https://uptime.hihimonitor.win/", 301));
     }
     // ─────────────────────────────────────
     
     // 針對 HEAD 探測直接回傳 200，避免觸發儀表板渲染耗費 D1 讀取資源
     if (request.method === 'HEAD') {
-      return new Response(null, { status: 200 });
+      return withSecurityHeaders(new Response(null, { status: 200 }));
     }
 
     // 忽略 favicon 請求，避免無謂消耗 D1 資源去渲染 HTML
     if (url.pathname === '/favicon.ico') {
-      return new Response(null, { status: 404 });
+      return withSecurityHeaders(new Response(null, { status: 404 }));
     }
 
     if (url.pathname === '/api/status') {
-      return await handleApiStatus(env);
+      return withSecurityHeaders(await handleApiStatus(env));
     }
     if (url.pathname === '/api/sites' && request.method === 'POST') {
-      return await handleAddSite(request, env);
-    }
-    if (url.pathname.startsWith('/api/sites/') && request.method === 'DELETE') {
-      return await handleDeleteSite(url, env);
+      return withSecurityHeaders(await handleAddSite(request, env));
+    }    if (url.pathname.startsWith('/api/sites/') && request.method === 'DELETE') {
+      return withSecurityHeaders(await handleDeleteSite(url, env));
     }
 
     // ============================================================
@@ -123,7 +122,7 @@ export default {
       console.log(`[CACHE HIT] 🚀 窗口未切換 (${dbVersion})，0 Read 直接回傳`);
     }
 
-    return response;
+    return withSecurityHeaders(response);
   },
 
   // ── 排程事件處理（健康檢查 + 資料清理）
@@ -421,7 +420,7 @@ function buildHTML(sites, alerts, env) {
     const dots = site.logs.map(log => {
       const c = log.status === 'ALIVE' ? '#10b981' : '#ef4444';
       const twTime = new Date(log.timestamp.replace(' ', 'T') + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-      return `<span class="dot" style="background:${c}" title="${twTime} ${log.status} ${log.latency_ms}ms"></span>`;
+      return `<span class="dot" style="background:${c}" title="${twTime} ${escapeHTML(log.status)} ${log.latency_ms}ms"></span>`;
     }).join('');
 
     const isAlive = site.last_stable_status === 'ALIVE';
@@ -434,8 +433,8 @@ function buildHTML(sites, alerts, env) {
     <div class="card ${isAlive ? '' : 'card-down'}">
       <div class="card-header">
         <div>
-          <h3>${site.name}</h3>
-          <span class="url">${site.url}</span>
+          <h3>${escapeHTML(site.name)}</h3>
+          <span class="url">${escapeHTML(site.url)}</span>
         </div>
         <span class="badge" style="background:${badgeColor}">${isAlive ? '正常' : '異常'}</span>
       </div>
@@ -462,8 +461,8 @@ function buildHTML(sites, alerts, env) {
     const ts = new Date(a.timestamp + 'Z').toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
     return `<tr>
       <td>${icon} ${label}</td>
-      <td>${a.site_name}</td>
-      <td>${a.channel}</td>
+      <td>${escapeHTML(a.site_name)}</td>
+      <td>${escapeHTML(a.channel)}</td>
       <td>${ts}</td>
       <td>${a.success ? '✅ 成功' : '❌ 失敗'}</td>
     </tr>`;
@@ -547,4 +546,35 @@ async function handleDeleteSite(url, env) {
   const id = url.pathname.split('/').pop();
   await env.DB.prepare('UPDATE sites SET is_active=0 WHERE id=?').bind(id).run();
   return Response.json({ success: true });
+}
+
+// ── 安全性輔助工具 ──
+
+/**
+ * 封裝常用的 HTTP 安全標頭
+ */
+function withSecurityHeaders(response) {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set('X-Frame-Options', 'DENY');
+  newResponse.headers.set('X-Content-Type-Options', 'nosniff');
+  newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  // CSP: 限制資源來源，允許 Google Fonts 與內聯樣式 (因儀表板點點使用 style 屬性)
+  const csp = "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;";
+  newResponse.headers.set('Content-Security-Policy', csp);
+  
+  return newResponse;
+}
+
+/**
+ * HTML 字串轉義 (防範 XSS)
+ */
+function escapeHTML(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
