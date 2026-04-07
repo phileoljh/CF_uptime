@@ -21,6 +21,7 @@ ALERT_CHANNELS = "line"
 # RATE_LIMIT_DASH = "30"
 # RATE_LIMIT_API = "10"
 
+
 # ── Cron 排程 ──
 [triggers]
 crons = ["*/5 * * * *", "0 19 * * *"]
@@ -30,4 +31,8 @@ crons = ["*/5 * * * *", "0 19 * * *"]
 enabled = true
 
 # ── 備註 ──
-# TELEGRAM_BOT_TOKEN 等敏感資訊應透過 Dashbord Secret 設定，不可寫入此處。
+# 敏感資訊應透過 Dashbord Secret 設定，不可寫入此處。
+# TELEGRAM_BOT_TOKEN = "..."
+# TELEGRAM_CHAT_ID = "..."
+# LINE_CHANNEL_ACCESS_TOKEN = "..."
+# LINE_USER_ID = "..."

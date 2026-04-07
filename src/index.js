@@ -10,16 +10,16 @@ export default {
   // ── HTTP 請求處理（儀表板 + API）
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    
+
     // ── [新增] 資源耗盡與限流防護 (Rate Limiting) ──
     const rateLimitRes = await checkRateLimit(request, env);
     if (rateLimitRes) return withSecurityHeaders(rateLimitRes);
     // ──────────────────────────────────────────────
 
-    // ── [新增] 惡意掃閱攔截邏輯 (方案二) ──
+    // ── [新增] 惡意掃閱攔截邏輯 ──
     // 條件一：判斷是否為非標準的 Port (通訊埠)
     const isUnusualPort = url.port !== "" && url.port !== "80" && url.port !== "443";
-    
+
     // 條件二：判斷路徑是否以 "/." 開頭 (涵蓋 /.git, /.env 等隱藏檔)
     const isHiddenFile = url.pathname.startsWith('/.');
 
@@ -28,7 +28,7 @@ export default {
       return withSecurityHeaders(Response.redirect("https://uptime.hihimonitor.win/", 301));
     }
     // ─────────────────────────────────────
-    
+
     // 針對 HEAD 探測直接回傳 200，避免觸發儀表板渲染耗費 D1 讀取資源
     if (request.method === 'HEAD') {
       return withSecurityHeaders(new Response(null, { status: 200 }));
@@ -42,9 +42,12 @@ export default {
     if (url.pathname === '/api/status') {
       return withSecurityHeaders(await handleApiStatus(env));
     }
+
     if (url.pathname === '/api/sites' && request.method === 'POST') {
       return withSecurityHeaders(await handleAddSite(request, env));
-    }    if (url.pathname.startsWith('/api/sites/') && request.method === 'DELETE') {
+    }
+
+    if (url.pathname.startsWith('/api/sites/') && request.method === 'DELETE') {
       return withSecurityHeaders(await handleDeleteSite(url, env, request));
     }
 
@@ -92,7 +95,7 @@ export default {
           const res = await renderDashboard(env);
           // 關鍵修正：將 Response 轉為純粹的字串 (String)，因為純字串可以安全地在多次併發連線間共享
           const htmlText = await res.text();
-          
+
           const cacheable = new Response(htmlText, {
             headers: {
               'Content-Type': 'text/html;charset=UTF-8',
@@ -102,12 +105,12 @@ export default {
           // 使用 await 確保快取確實寫入記憶體後再放行，保障後續併發
           await cache.put(cacheKey, cacheable);
           console.log(`[D1 查詢] 新的 5 分鐘窗口 (${dbVersion})，重新渲染儀表板`);
-          
+
           return htmlText; // 回傳字串供大家搭便車共用
         })();
-        
+
         renderLocks.set(cacheKeyUrl, renderPromise);
-        
+
         try {
           const sharedHtml = await renderPromise;
           response = new Response(sharedHtml, {
@@ -571,11 +574,11 @@ function withSecurityHeaders(response) {
   newResponse.headers.set('X-Frame-Options', 'DENY');
   newResponse.headers.set('X-Content-Type-Options', 'nosniff');
   newResponse.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  
+
   // CSP: 限制資源來源，允許 Google Fonts、Cloudflare 分析腳本與內聯樣式 (含 Web Worker 與 Beacon)
   const csp = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; worker-src 'self' blob:;";
   newResponse.headers.set('Content-Security-Policy', csp);
-  
+
   return newResponse;
 }
 
@@ -613,16 +616,16 @@ async function checkRateLimit(request, env) {
 
   // 門檻設定：優先讀取環境變數，預設為 Dash 30/min, API 10/min
   const threshold = parseInt(isApiRequest ? (env.RATE_LIMIT_API || '10') : (env.RATE_LIMIT_DASH || '30'));
-  
+
   const cache = caches.default;
   const baseUrl = `http://ratelimit.local/${type}/${ip}`;
-  
+
   // 1. 檢查是否存在「封鎖標記」 (Block Flag)
   const blockKey = new Request(`${baseUrl}/blocked`);
   const isBlocked = await cache.match(blockKey);
   if (isBlocked) {
     console.log(`[RATE LIMIT] 🛑 IP ${ip} 仍在封鎖期間 (Type: ${type})`);
-    return new Response('Too Many Requests (IP Blocked for 1m)', { 
+    return new Response('Too Many Requests (IP Blocked for 1m)', {
       status: 429,
       headers: { 'Retry-After': '60' }
     });
@@ -631,7 +634,7 @@ async function checkRateLimit(request, env) {
   // 2. 檢查/更新「計數器」 (Counter)
   const countKey = new Request(`${baseUrl}/count`);
   const cachedRes = await cache.match(countKey);
-  
+
   let currentCount = 0;
   if (cachedRes) {
     currentCount = parseInt(await cachedRes.text()) || 0;
@@ -646,8 +649,8 @@ async function checkRateLimit(request, env) {
     // 使用 waitUntil 異步寫入，不阻塞主流程
     // 注意：在 fetch 中 ctx 可能不直接傳入，但可利用 request.signal 或直接 await
     await cache.put(blockKey, blockRes);
-    
-    return new Response('Too Many Requests (Rate limit exceeded)', { 
+
+    return new Response('Too Many Requests (Rate limit exceeded)', {
       status: 429,
       headers: { 'Retry-After': '60' }
     });
